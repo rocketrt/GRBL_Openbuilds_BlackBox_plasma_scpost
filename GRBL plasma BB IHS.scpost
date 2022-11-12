@@ -1,0 +1,160 @@
+ --this is an extra delay added to the first pierce as needed by some machines
+firstPierceTime = 0
+
+ --Put your switch offset value here in MILLIMETRES
+ --Put a sheet of metal on your machine and place a sheet of paper on top.
+ --Slowly jog the torch down onto the paper until the touch-off switch just operates.
+ --Zero the Z axis then pull gently on the paper and slowly jog up until the paper slides out.
+ --The Z axis position is your switch offset.
+--switchOffset = 6.700 -- uncomment (--) for use
+
+ -- speed reference for probing
+refFeed = 500
+
+ -- force extension file name to .nc
+post.ForceExtension("nc")
+
+function OnAbout(event)
+   ctrl = event:GetTextCtrl()
+   ctrl:AppendText("GRBL plasma post processor for BlackBox\n")
+   ctrl:AppendText("\n")
+   ctrl:AppendText("Generic plasma post for machines with or without THC\n")
+   ctrl:AppendText("\n")
+   ctrl:AppendText("Modal G-codes and coordinates\n")
+   ctrl:AppendText("No comments\n")
+   ctrl:AppendText("M03/M05 turn the torch on/off\n")
+   ctrl:AppendText("Incremental IJ\n")
+end
+
+
+
+
+function OnInit()
+
+   post.SetOptions(post.ARC_SEGMENTS)
+   post.SetCommentChars ("()", "[]")  --make sure ( and ) characters do not appear in system text
+   post.Text (" G54\n")
+   post.Text (" G90\n")
+   if(scale == metric) then
+      post.Text (" G21\n") --metric mode
+      format = "0.0###"
+   else
+      post.Text (" G20\n") --inch mode
+      format = "0.0####"
+   end
+   bigArcs = 1 --stitch arc segments together
+   minArcSize = 0.002 --arcs smaller than this are converted to moves
+   --minArcSize = 0.05 --arcs smaller than this are converted to moves
+   firstRef = true    -- test with first ref 05062021
+   firstPierce = firstPierceTime
+end
+
+function OnFinish()
+   post.Text (" M05 M30\n")
+   --post.ModalText(" G28 Z") -- move at home
+   --post.Number(25.000 * scale, "0.0###")  -- lift 25mm on Z
+   post.Eol()
+end
+
+function OnRapid()
+   post.ModalText (" G00")
+   post.ModalNumber (" X", endX * scale, format)
+   post.ModalNumber (" Y", endY * scale, format)
+   if endZ ~= pierceHeight then
+      post.ModalNumber (" Z", endZ * scale, format)
+   end
+   post.Eol()
+end
+
+function OnMove()
+   post.ModalText (" G01")
+   post.ModalNumber (" X", endX * scale, format)
+   post.ModalNumber (" Y", endY * scale, format)
+   post.ModalNumber (" Z", endZ * scale, format)
+   post.ModalNumber (" F", feedRate * scale, "0.0###")
+   post.Eol()
+end
+
+function OnArc()
+   if(arcAngle <0) then
+      post.ModalText (" G03")
+   else
+      post.ModalText (" G02")
+   end
+   post.NonModalNumber (" X", endX * scale, format)
+   post.NonModalNumber (" Y", endY * scale, format)
+   post.ModalNumber (" Z", endZ * scale, format)
+   post.Text (" I")
+   post.Number ((arcCentreX - currentX) * scale, format)
+   post.Text (" J")
+   post.Number ((arcCentreY - currentY) * scale, format)
+   post.ModalNumber (" F", feedRate * scale, "0.0###")
+   post.Eol()
+end
+
+
+function OnPenDown()
+   Reference()
+   if (preheat > 0.001) then
+      post.ModalText (" G00")
+      --post.ModalNumber (" Z", cutHeight * scale, format)
+      post.ModalNumber (" Z", pierceHeight * scale, "0.0###")
+      post.Text ("\n G04 P")
+      post.Number (preheat,"0.###")
+      post.Eol()
+   end
+   post.ModalText (" G00")
+   post.ModalNumber (" Z", pierceHeight * scale, format)
+   post.Text ("\n M03 S1000\n") -- added for torch on
+   post.Eol()
+   if (pierceDelay + firstPierce > 0.001) then
+      post.Text (" G04 P")
+      post.Number (pierceDelay + firstPierce,"0.0###")
+      firstPierce = 0
+      post.Eol()
+   end
+   post.CancelModalNumbers()
+end
+
+-- uncomment (--) to activate 
+function Reference()
+   firstRef = false             --false at origin
+   post.ModalText(" G38.2 Z")
+   post.Number(-50 * scale, "0.0###")
+   post.ModalNumber (" F", refFeed * scale, "0.0###")
+   post.Eol()
+   --post.ModalNumber (" F", feedRate * scale, "0.0###")  -- select this for same as plunge rate with tool setting
+   post.ModalText (" G10 L20 P1 Z-4.600\n")
+   --post.ModalText (" G92 Z0.0000\n") -- change this for test
+   --post.ModalText (" G00")
+   --post.Text(" Z")
+   --post.Number (switchOffset * scale, "0.0###")
+   --post.ModalText(" G92 Z0.0000\n")
+   --post.ModalText (" G00")
+   post.Eol()
+end
+
+
+function OnPenUp()
+   post.Text (" M05\n")
+   if (endDelay > 0) then
+      post.Text (" G04 P")
+      post.Number (endDelay,"0.0###")
+      post.Eol()
+   end
+end
+
+
+function OnDrill()
+   OnRapid()
+   OnPenDown()
+   endZ = drillZ
+   OnMove()
+   OnPenUp()
+   endZ = safeZ
+  OnRapid()
+end
+
+--function OnComment()
+  --post.Text(" (",comment text,")\n")
+--end
